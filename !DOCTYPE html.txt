@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+<meta charset="UTF-8">
+<title>TOPIK CITY Xorazm - Full Online</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+body{margin:0;font-family:Arial,sans-serif;background:#f9fafb;color:#064e3b;}
+header{background:#16a34a;color:white;padding:20px;text-align:center;}
+button{background:#22c55e;color:white;border:none;padding:10px 18px;margin:5px;border-radius:8px;cursor:pointer;font-weight:bold;transition:0.3s;}
+button:hover{background:#16a34a;transform:scale(1.05);}
+input{padding:6px;margin:2px;border-radius:6px;border:1px solid #ccc;}
+table{width:100%;border-collapse:collapse;margin-top:10px;background:white;border-radius:10px;overflow:hidden;}
+th,td{padding:10px;border:1px solid #ddd;text-align:center;}
+th{background:#dcfce7;}
+.card{background:white;padding:20px;border-radius:12px;margin-bottom:20px;}
+canvas{margin-top:20px;}
+</style>
+</head>
+<body>
+
+<header>
+<h1>TOPIK CITY Xorazm</h1>
+<p>Full Online Attendance va Ball Tracking (1 oy)</p>
+</header>
+
+<div style="text-align:center;padding:20px;">
+<button onclick="openGroup(1)">Group 1</button>
+<button onclick="openGroup(2)">Group 2</button>
+</div>
+
+<div id="content" style="padding:20px;"></div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<script>
+// --- Firebase config ---
+const firebaseConfig = {
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_PROJECT.firebaseapp.com",
+  databaseURL: "https://YOUR_PROJECT.firebaseio.com",
+  projectId: "YOUR_PROJECT",
+  storageBucket: "YOUR_PROJECT.appspot.com",
+  messagingSenderId: "YOUR_SENDER_ID",
+  appId: "YOUR_APP_ID"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+// --- Groups data ---
+let groups = {1:{students:[],attendance:{},scores:{}},2:{students:[],attendance:{},scores:{}}};
+db.ref('groups').on('value', snapshot=>{
+  if(snapshot.exists()) groups = snapshot.val();
+});
+
+// --- Current Group ---
+let currentGroup = null;
+
+// --- Open Group ---
+function openGroup(g){
+  currentGroup = g;
+  let html = `<div class="card">
+    <h3>Group ${g}</h3>
+    <button onclick="openAttendance()">📅 Guruhga kirish</button>
+    <button onclick="showStats(7)">📊 7 Kunlik Statistika</button>
+    <button onclick="showStats(30)">📈 30 Kunlik Statistika</button>
+    <button onclick="showMonth()">📅 1 Oylik Daily Chart</button>
+    </div>`;
+  document.getElementById("content").innerHTML = html;
+}
+
+// --- Attendance / Add Student ---
+function openAttendance(){
+  const group = groups[currentGroup];
+  const today = new Date().toISOString().split("T")[0];
+
+  // Har kun attendance va scores avtomatik qo‘shiladi
+  if(!group.attendance[today]) group.attendance[today] = Array(group.students.length).fill(false);
+  if(!group.scores[today]) group.scores[today] = Array(group.students.length).fill(0);
+
+  let html = `<div class="card">
+  <h3>Student qo‘shish (20 tagacha)</h3>
+  <input id="name" placeholder="Ism">
+  <input id="surname" placeholder="Familiya">
+  <button onclick="addStudent()">Qo‘shish</button>
+  <table><tr><th>Ism</th><th>Familiya</th><th>Attendance</th><th>Ball</th></tr>`;
+
+  group.students.forEach((s,index)=>{
+    html += `<tr>
+      <td>${s.name}</td>
+      <td>${s.surname}</td>
+      <td>
+        <button onclick="mark(${index},true)">✅</button>
+        <button onclick="mark(${index},false)">❌</button>
+      </td>
+      <td><input type="number" min="0" max="5" value="${group.scores[today][index]||0}" onchange="saveScore(${index},this.value)"></td>
+    </tr>`;
+  });
+
+  html += `</table><button onclick="openGroup(currentGroup)">⬅ Orqaga</button></div>`;
+  document.getElementById("content").innerHTML = html;
+}
+
+// --- Add Student ---
+function addStudent(){
+  const name = document.getElementById("name").value.trim();
+  const surname = document.getElementById("surname").value.trim();
+  if(!name || !surname){ alert("To‘ldiring"); return; }
+  if(groups[currentGroup].students.length>=20){ alert("20 ta limit"); return; }
+  groups[currentGroup].students.push({name,surname});
+  saveGroups();
+  openAttendance();
+}
+
+// --- Mark Attendance ---
+function mark(index,status){
+  const today = new Date().toISOString().split("T")[0];
+  const group = groups[currentGroup];
+  group.attendance[today][index] = status;
+  saveGroups();
+  openAttendance(); // refresh
+}
+
+// --- Save Score ---
+function saveScore(index,val){
+  const today = new Date().toISOString().split("T")[0];
+  const group = groups[currentGroup];
+  group.scores[today][index] = Number(val);
+  saveGroups();
+}
+
+// --- Show Stats ---
+function showStats(days){
+  const group = groups[currentGroup];
+  const today = new Date();
+  let summary = group.students.map(s=>({name:s.name,total:0,att:0}));
+
+  for(let i=0;i<days;i++){
+    const d = new Date(today.getFullYear(),today.getMonth(),today.getDate()-i).toISOString().split("T")[0];
+    if(group.scores[d]){
+      group.scores[d].forEach((val,idx)=>{ if(val) summary[idx].total += val; });
+    }
+    if(group.attendance[d]){
+      group.attendance[d].forEach((val,idx)=>{ if(val) summary[idx].att += val?1:0; });
+    }
+  }
+
+  let labels = summary.map(s=>s.name);
+  let data = [];
+  let bg = [];
+
+  if(days===7){
+    const sorted = [...summary].sort((a,b)=>b.total-a.total);
+    summary.forEach(s=>{
+      data.push(s.total);
+      const rank = sorted.indexOf(s);
+      if(rank===0) bg.push('gold');
+      else if(rank===1) bg.push('silver');
+      else if(rank===2) bg.push('#cd7f32');
+      else bg.push('rgba(34,197,94,0.7)');
+    });
+  } else {
+    summary.forEach(s=>{
+      const percent = Math.round((s.att/days)*100);
+      data.push(percent);
+      bg.push('rgba(34,197,94,0.7)');
+    });
+  }
+
+  let html = `<div class="card">
+    <h3>${days===7?'7 Kunlik Statistika':'30 Kunlik Attendance (%)'}</h3>
+    <canvas id="chartCanvas" height="200"></canvas>
+    <button onclick="openGroup(currentGroup)">⬅ Orqaga</button>
+  </div>`;
+  document.getElementById("content").innerHTML = html;
+
+  new Chart(document.getElementById('chartCanvas'),{
+    type:'bar',
+    data:{labels:labels,datasets:[{label:days===7?'Ball (7 kun)':'Attendance % (30 kun)',data:data,backgroundColor:bg,borderColor:'rgba(22,163,74,1)',borderWidth:1}]},
+    options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,max:days===7?5:100}}}
+  });
+}
+
+// --- Show 1 Month Daily Chart ---
+function showMonth(){
+  const group = groups[currentGroup];
+  const today = new Date();
+  let labels = [];
+  let attendanceData = [];
+  let scoreData = [];
+
+  for(let i=29;i>=0;i--){
+    const d = new Date(today.getFullYear(),today.getMonth(),today.getDate()-i);
+    const ds = d.toISOString().split("T")[0];
+    labels.push(ds);
+    let att = 0;
+    let score = 0;
+    if(group.attendance[ds]) att = Math.round(group.attendance[ds].filter(x=>x).length/group.students.length*100);
+    if(group.scores[ds]) score = group.scores[ds].reduce((a,b)=>a+b,0);
+    attendanceData.push(att);
+    scoreData.push(score);
+  }
+
+  let html = `<div class="card">
+    <h3>1 Oylik Daily Chart</h3>
+    <canvas id="monthChart" height="200"></canvas>
+    <button onclick="openGroup(currentGroup)">⬅ Orqaga</button>
+  </div>`;
+  document.getElementById("content").innerHTML = html;
+
+  new Chart(document.getElementById('monthChart'),{
+    type:'bar',
+    data:{
+      labels:labels,
+      datasets:[
+        {label:'Attendance %',data:attendanceData,backgroundColor:'rgba(34,197,94,0.7)'},
+        {label:'Total Ball',data:scoreData,backgroundColor:'rgba(59,130,246,0.7)'}
+      ]
+    },
+    options:{responsive:true,plugins:{legend:{display:true}},scales:{y:{beginAtZero:true}}}
+  });
+}
+
+// --- Save Groups ---
+function saveGroups(){ db.ref('groups').set(groups); }
+</script>
+</body>
+</html>
